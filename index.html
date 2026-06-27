@@ -926,6 +926,36 @@ tr.div-neg td{background:#fdf0ee !important}
 
 <!-- ═══ FICHA TECNICA PRODUTO FINAL ════════════════════════════════════════════ -->
 <div class="page" id="page-ficha-tecnica">
+  <div class="card" id="ft-rel-custos-card" style="margin-top:12px;border-left:4px solid var(--accent);background:linear-gradient(90deg,rgba(26,92,56,.06),var(--surface) 34%)">
+    <div class="card-title" style="font-size:12px;color:var(--accent)">Relatorio de Custos das Fichas</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.45;margin-bottom:10px">
+      Fechamentos salvos no Sheets para consulta historica e comparacao de custos por produto e por insumo.
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="previsualizarRelatorioCustosFichas()" id="btn-preview-rel-custos-ft">Pre-visualizar relatorio</button>
+      <button class="btn" onclick="imprimirRelatorioCustosFichas('sintetico')">Imprimir sintetico</button>
+      <button class="btn" onclick="imprimirRelatorioCustosFichas('analitico')">Imprimir analitico</button>
+      <button class="btn" onclick="limparPreviewRelatorioCustosFichas()">Limpar previa</button>
+      <button class="btn btn-primary" onclick="salvarRelatorioCustosFichas()" id="btn-salvar-rel-custos-ft">Salvar relatorio do periodo atual (hoje)</button>
+    </div>
+    <div class="form-grid" style="margin-top:12px">
+      <div class="form-group" style="grid-column:span 2">
+        <label>Relatorio base</label>
+        <select id="ft-rel-base" onchange="relCustosComparacaoAtual=null"><option value="">Nenhum fechamento salvo</option></select>
+      </div>
+      <div class="form-group" style="grid-column:span 2">
+        <label>Relatorio para comparar</label>
+        <select id="ft-rel-comparar" onchange="relCustosComparacaoAtual=null"><option value="">Nenhum fechamento salvo</option></select>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="compararRelatoriosCustosFichas()">Comparar periodos</button>
+      <button class="btn" onclick="imprimirComparacaoRelatoriosCustosFichas()">Imprimir comparacao</button>
+    </div>
+    <div id="ft-rel-custos-status" class="empty" style="padding:12px;margin-top:10px">Nenhum relatorio gerado nesta sessao.</div>
+    <div id="ft-rel-comparacao-status" class="empty" style="padding:12px;margin-top:10px">Selecione dois fechamentos para comparar.</div>
+  </div>
+
   <div class="card">
     <div class="card-title">📋 Ficha Tecnica do Produto Final</div>
     <div class="form-grid">
@@ -1260,7 +1290,7 @@ tr.div-neg td{background:#fdf0ee !important}
 </div><!-- /main -->
 
 <div class="toast" id="toast"></div>
-<div id="app-version">Rev 4.10</div>
+<div id="app-version">Rev 4.26.2</div>
 
 <script>
 // ═══ CONFIG ═══════════════════════════════════════════════════════
@@ -1290,12 +1320,16 @@ let S = {
   estoqueAtual:[],
   contagensEstoque:[],
   pedidos:[],
+  custosFichaSintetico:[],
+  custosFichaAnalitico:[],
   depara:[],
   ops:[],
   caixasAmostra:[]
 };
 let USUARIO_LOGADO = null;
 let pedidosCsvDados = [];
+let relCustosPreviewAtual = null;
+let relCustosComparacaoAtual = null;
 const WMS_URL = 'https://script.google.com/macros/s/AKfycbxbQW8d8Y2WC5zl1RNfFKFrBSbodm5EoyJ405nm6aWXu62pFFmRIcxNMITy1d5vfIHu/exec';
 const WMS_MATERIAIS_SHEET_ID = '14x4XVbjqs_2_2NR4OqfzF3WTpFAr3oZKoRYH9pFqoVY';
 const WMS_MATERIAIS_GID = '996582166';
@@ -1480,6 +1514,9 @@ function loadingMsgForAction(action){
     excluirOP:'Excluindo ordem de producao...',
     saveFicha:'Salvando ficha de intermediario...',
     saveFichaTecnica:'Salvando ficha tecnica do produto final...',
+    salvarFechamentoCustosFichas:'Salvando fechamento de custos das fichas...',
+    pmsRelCustosSalvarV425:'Salvando fechamento de custos das fichas...',
+    inicializarCustosFichas:'Inicializando abas de fechamento de custos...',
     saveContagemEstoque:'Salvando contagem de estoque...',
     importarPedidos:'Importando pedidos...',
     saveUsuario:'Salvando usuario...'
@@ -1671,6 +1708,26 @@ async function gsCall(payload){
   finally{mostrarLoading(false);}
 }
 
+async function gsCallSemOverlay(payload){
+  if(!SCRIPT_URL) return {ok:false,error:'Configure a URL do Apps Script.'};
+  try{
+    let text=null;
+    try{
+      const r=await fetch(SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload),redirect:'follow'});
+      text=await r.text();
+    }catch(e){
+      const url=SCRIPT_URL+'?payload='+encodeURIComponent(JSON.stringify(payload));
+      const r=await fetch(url,{redirect:'follow'});
+      text=await r.text();
+    }
+    if(!text||!text.trim()) return {ok:false,error:'Servidor sem resposta.'};
+    try{return JSON.parse(text);}
+    catch(e){return {ok:false,error:'Resposta inesperada: '+text.substring(0,120)};}
+  }catch(e){
+    return {ok:false,error:'Erro de conexao: '+(e.message||e)};
+  }
+}
+
 async function sincronizar(silencioso){
   if(!SCRIPT_URL){
     setSyncStatus('offline','Sem URL');
@@ -1717,6 +1774,8 @@ async function sincronizar(silencioso){
       S.estoqueAtual     = r.estoqueAtual||[];
       S.contagensEstoque = r.contagensEstoque||[];
       S.pedidos          = (r.pedidos||[]).map(normPed).filter(p=>p);
+      S.custosFichaSintetico = r.custosFichaSintetico||[];
+      S.custosFichaAnalitico = r.custosFichaAnalitico||[];
       S.depara           = r.depara||[];
       S.caixasAmostra    = r.caixasAmostra||[];
 
@@ -4038,7 +4097,7 @@ async function salvarPedidosImportados(preview){
     }
     const erro = (r && r.error) || 'Falha ao salvar pedidos.';
     if(String(erro).toLowerCase().includes('op nao encontrada') || String(erro).toLowerCase().includes('op não encontrada')){
-      return {ok:false, error:'A URL publicada ainda responde com saveOP antigo. A importacao foi bloqueada antes de gravar em ordens_producao. No Apps Script, deixe apenas um doPost/handler ativo e use o PMS Script.txt Rev 4.09.'};
+      return {ok:false, error:'A URL publicada ainda responde com saveOP antigo. A importacao foi bloqueada antes de gravar em ordens_producao. No Apps Script, deixe apenas um doPost/handler ativo e use o PMS Script.txt Rev 4.25.'};
     }
     return {ok:false, error: erroAcaoDesconhecida(r, 'importarPedidosPMSFinal')
       ? 'A URL publicada ainda nao reconhece importarPedidosPMSFinal. Cole o arquivo ZZZZZ_IMPORTAR_PEDIDOS_PMS_FINAL.gs no FINAL do Apps Script ativo e publique a implantacao existente. Detalhe: '+erro
@@ -4390,6 +4449,7 @@ function renderFichaTecnicaPage(){
   renderFichaTecnicaCloneSelect();
   renderFichaTecnicaInsumos();
   renderFichasTecnicasSalvas();
+  renderRelatorioCustosFichasResumo();
   if(!ftMateriaisCarregados) carregarMateriaisFichaTecnica();
   else populateFichaTecnicaInsumos();
 }
@@ -5164,6 +5224,932 @@ function custoProporcionalInsumoFicha(item){
   const valorUnit = valorUnitInsumoFicha(item);
   const qtd = parseNumeroBR(item && item.qtd);
   return qtd * valorUnit;
+}
+
+function renderRelatorioCustosFichasResumo(){
+  const box = document.getElementById('ft-rel-custos-status');
+  if(!box) return;
+  const rels = listarFechamentosCustosFichas();
+  preencherSelectsRelatoriosCustos(rels);
+  if(!rels.length){
+    box.className = 'empty';
+    box.style.padding = '12px';
+    box.textContent = 'Nenhum relatorio salvo.';
+    return;
+  }
+  const ult = rels[0];
+  box.className = '';
+  box.style.padding = '12px';
+  box.innerHTML = `<div style="font-size:12px;color:var(--text2);line-height:1.45">
+    <strong>Ultimo relatorio salvo:</strong> ${h(ult.id)} | Data: ${fmtBR(ult.data)} | Produtos: ${ult.itens}
+    <br>Fechamentos salvos: ${rels.length}. Use os campos acima para comparar um periodo contra outro.
+  </div>`;
+}
+
+function listarFechamentosCustosFichas(){
+  const regs = (S.custosFichaSintetico || []).filter(r => String(r.ativo).toLowerCase() !== 'false');
+  const porRel = {};
+  regs.forEach(r => {
+    const id = String(r.relatorioId || '');
+    if(!id) return;
+    if(!porRel[id]) porRel[id] = {id, data:r.dataRelatorio, itens:0, total:0, criadoEm:r.criadoEm};
+    porRel[id].itens++;
+    porRel[id].total += parseNumeroBR(r.valorUnitario);
+    if(String(r.criadoEm || '') > String(porRel[id].criadoEm || '')) porRel[id].criadoEm = r.criadoEm;
+  });
+  return Object.values(porRel).sort((a,b) =>
+    String(b.data || '').localeCompare(String(a.data || ''))
+    || String(b.criadoEm || '').localeCompare(String(a.criadoEm || ''))
+    || String(b.id || '').localeCompare(String(a.id || ''))
+  );
+}
+
+function preencherSelectsRelatoriosCustos(rels){
+  const base = document.getElementById('ft-rel-base');
+  const atual = document.getElementById('ft-rel-comparar');
+  if(!base || !atual) return;
+  const oldBase = base.value;
+  const oldAtual = atual.value;
+  const opts = rels.map(r => `<option value="${h(r.id)}">${h(fmtBR(r.data))} | ${h(r.id)} | ${r.itens} produtos</option>`).join('');
+  base.innerHTML = opts || '<option value="">Nenhum fechamento salvo</option>';
+  atual.innerHTML = opts || '<option value="">Nenhum fechamento salvo</option>';
+  const ids = new Set(rels.map(r => r.id));
+  base.value = ids.has(oldBase) ? oldBase : (rels[1] && rels[1].id) || (rels[0] && rels[0].id) || '';
+  atual.value = ids.has(oldAtual) ? oldAtual : (rels[0] && rels[0].id) || '';
+}
+
+async function previsualizarRelatorioCustosFichas(){
+  const btn = document.getElementById('btn-preview-rel-custos-ft');
+  if(btn) btn.disabled = true;
+  mostrarLoading(true, 'Calculando pre-visualizacao do relatorio...');
+  try{
+    const rel = await gerarPreviewRelatorioCustosFichas();
+    relCustosPreviewAtual = rel;
+    abrirPopupPreviewRelatorioCustosFichas(rel);
+    renderRelatorioCustosFichasResultado(rel, {
+      titulo: 'Pre-visualizacao aberta em popup',
+      aviso: 'Ainda nao foi salvo no Sheets. O painel principal foi mantido compacto.'
+    });
+  }catch(e){
+    const msg = e && e.message ? e.message : String(e);
+    const box = document.getElementById('ft-rel-custos-status');
+    if(box){ box.className='empty'; box.style.padding='12px'; box.textContent = msg; }
+    notify(msg, 'error');
+  }finally{
+    mostrarLoading(false);
+    if(btn) btn.disabled = false;
+  }
+}
+
+function limparPreviewRelatorioCustosFichas(){
+  relCustosPreviewAtual = null;
+  renderRelatorioCustosFichasResumo();
+  notify('Previa do relatorio limpa.');
+}
+
+function abrirPopupPreviewRelatorioCustosFichas(rel){
+  const html = montarHtmlPreviewRelatorioCustos(rel);
+  const win = window.open('', '_blank', 'width=1100,height=780');
+  if(!win) throw new Error('O navegador bloqueou a janela de pre-visualizacao. Libere pop-ups para este arquivo e tente novamente.');
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+}
+
+function montarHtmlPreviewRelatorioCustos(rel){
+  const sinteticos = (rel.sinteticoRows || []).slice().sort((a,b) =>
+    String(a.produtoCod || '').localeCompare(String(b.produtoCod || ''), 'pt-BR', {numeric:true})
+    || String(a.produtoNome || '').localeCompare(String(b.produtoNome || ''), 'pt-BR')
+  );
+  const analiticos = (rel.analiticoRows || []).slice().sort((a,b) =>
+    String(a.produtoCod || '').localeCompare(String(b.produtoCod || ''), 'pt-BR', {numeric:true})
+    || safeNum(b.custoUnitario) - safeNum(a.custoUnitario)
+  );
+  const anaPorProduto = {};
+  analiticos.forEach(i => {
+    const key = String(i.produtoId || i.produtoCod || i.produtoNome || '');
+    if(!anaPorProduto[key]) anaPorProduto[key] = [];
+    anaPorProduto[key].push(i);
+  });
+  const sinteticoHtml = sinteticos.map(p => htmlCardSinteticoRelatorio(p)).join('');
+  const comparacaoHtml = htmlComparacaoRelatorioCustos(rel, 30);
+  const analiticoHtml = sinteticos.map(p => {
+    const key = String(p.produtoId || p.produtoCod || p.produtoNome || '');
+    const itens = anaPorProduto[key] || [];
+    return `<section class="produto-block">
+      <h3>${h(linhaProdutoRelatorio(p))}</h3>
+      <table>
+        <thead><tr><th>ID</th><th>Insumo</th><th>Categoria</th><th>Qtd</th><th>Unidade</th><th>Valor WMS</th><th>Custo</th><th>%</th></tr></thead>
+        <tbody>${itens.map(i => `<tr>
+          <td>${h(i.insumoId || '-')}</td>
+          <td>${h(i.insumoNome || '-')}</td>
+          <td>${h(i.cat || '-')}</td>
+          <td class="num">${fmtQtdFicha(i.qtdUnidade)}</td>
+          <td>${h(i.unidadeComercial || '-')}</td>
+          <td class="num">${fmtMoeda(i.valorUnitInsumo)}</td>
+          <td class="num strong">${fmtMoeda(i.custoUnitario)}</td>
+          <td class="num">${fmtQtdFicha(i.pctCusto)}%</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </section>`;
+  }).join('');
+  return `<!doctype html><html><head><meta charset="utf-8">
+    <title>Previa - Relatorio de Custos das Fichas</title>
+    <link rel="icon" type="image/png" href="${LOGO_URL}">
+    <style>
+      @page{size:A4;margin:10mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#15231b;margin:0;background:#fff;font-size:11px;padding:16px}
+      .print-header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #1a5c38;padding-bottom:10px;margin-bottom:10px}
+      .print-logo{width:54px;height:54px;object-fit:contain}
+      h1{font-size:18px;margin:0 0 4px;color:#1a5c38}
+      h2{font-size:15px;margin:16px 0 8px;color:#163a27}
+      h3{font-size:13px;line-height:1.25;margin:0 0 5px;color:#163a27;border-bottom:1px solid #9fb9aa;padding-bottom:4px}
+      .meta{font-size:11px;color:#53635a;line-height:1.35}
+      .summary{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px;font-size:11px;color:#26352d}
+      .summary span{border:1px solid #d8e3dc;border-radius:4px;padding:5px 8px;background:#f7faf8}
+      .sintetico-list{display:flex;flex-direction:column;gap:5px}
+      .sintetico-card{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #d8e3dc;border-left:3px solid #1a5c38;border-radius:4px;padding:7px 9px;break-inside:avoid;page-break-inside:avoid}
+      .sintetico-main{display:flex;align-items:center;gap:8px;min-width:0}
+      .sintetico-cod{font-size:10px;font-weight:800;color:#fff;background:#1a5c38;border-radius:3px;padding:3px 6px;white-space:nowrap}
+      .sintetico-produto{font-size:12px;font-weight:700;line-height:1.22}
+      .sintetico-metrics{display:flex;align-items:center;gap:12px;white-space:nowrap}
+      .sintetico-metrics span{display:flex;flex-direction:column;align-items:flex-end}
+      .sintetico-metrics small{font-size:8px;color:#66746c;text-transform:uppercase;letter-spacing:.02em}
+      .sintetico-metrics strong{font-size:12px;color:#24342b}
+      .sintetico-metrics .total strong{font-size:14px;color:#1a5c38}
+      .produto-block{break-inside:avoid;page-break-inside:avoid;margin:0 0 13px}
+      table{width:100%;border-collapse:collapse}
+      th{background:#eef5f1;color:#1a5c38;font-size:9px;text-align:left;border:1px solid #cad8d0;padding:4px}
+      td{font-size:9px;border:1px solid #dfe7e2;padding:3px 4px;vertical-align:top}
+      .num{text-align:right;white-space:nowrap}
+      .strong{font-weight:700;color:#163a27}
+      .actions{position:sticky;top:0;background:#fff;border-bottom:1px solid #d9e2dc;padding:0 0 10px;margin-bottom:10px;text-align:right}
+      .actions button{padding:8px 14px;border:0;background:#1a5c38;color:#fff;border-radius:4px;cursor:pointer}
+      @media print{body{padding:0}.actions{display:none}}
+    </style>
+  </head><body>
+    <div class="actions"><button onclick="window.print()">Imprimir esta previa</button></div>
+    <div class="print-header">
+      <img class="print-logo" src="${LOGO_URL}" alt="Explosao Alimentos">
+      <div><h1>Previa - Relatorio de Custos das Fichas</h1><div class="meta">Data: ${fmtBR(rel.dataRelatorio || hoje())} | Gerado em ${new Date().toLocaleString('pt-BR')}<br>Fonte: ${h(rel.fontePrecos || 'WMS')}</div></div>
+    </div>
+    <div class="summary">
+      <span>Total de produtos: <strong>${safeNum(rel.sinteticos)}</strong></span>
+      <span>Itens analiticos: <strong>${safeNum(rel.analiticos)}</strong></span>
+      <span>Insumos sem preco: <strong>${safeNum(rel.insumosSemPrecoWms)}</strong></span>
+    </div>
+    <h2>Sintetico</h2>
+    <section class="sintetico-list">${sinteticoHtml || '<p>Nenhum produto para mostrar.</p>'}</section>
+    ${comparacaoHtml}
+    <h2>Analitico</h2>
+    ${analiticoHtml || '<p>Nenhum insumo para mostrar.</p>'}
+  </body></html>`;
+}
+
+function htmlCardSinteticoRelatorio(p){
+  const cod = String(p.produtoCod || '').trim();
+  const nome = String(p.produtoNome || '').trim() || '-';
+  return `<div class="sintetico-card">
+    <div class="sintetico-main">
+      ${cod ? `<span class="sintetico-cod">${h(cod)}</span>` : ''}
+      <span class="sintetico-produto">${h(nome)}</span>
+    </div>
+    <div class="sintetico-metrics">
+      <span><small>Itens</small><strong>${safeNum(p.qtdInsumos)}</strong></span>
+      <span class="total"><small>Custo total</small><strong>${fmtMoeda(p.valorUnitario)}</strong></span>
+    </div>
+  </div>`;
+}
+
+function htmlComparacaoRelatorioCustos(rel, limite){
+  const comps = (rel.comparacoes || [])
+    .slice()
+    .filter(c => Math.abs(safeNum(c.variacaoValor)) > 0.000001)
+    .sort((a,b) => Math.abs(safeNum(b.variacaoValor)) - Math.abs(safeNum(a.variacaoValor)))
+    .slice(0, limite || 30);
+  if(!comps.length){
+    return `<h2>Comparacao com ultimo fechamento salvo</h2><p class="meta">Primeiro fechamento ou sem variacao em relacao ao ultimo relatorio salvo.</p>`;
+  }
+  return `<h2>Comparacao com ultimo fechamento salvo</h2>
+    <table>
+      <thead><tr><th>Produto</th><th>Anterior</th><th>Atual</th><th>Dif.</th><th>%</th><th>Principais variacoes</th></tr></thead>
+      <tbody>${comps.map(c => {
+        const produto = c.produtoCod ? `${c.produtoCod} - ${c.produtoNome}` : c.produtoNome;
+        const sinal = safeNum(c.variacaoValor) > 0 ? '+' : '';
+        const top = (c.topVariacoes || []).slice(0, 3).map(v => {
+          const s = safeNum(v.variacaoValor) > 0 ? '+' : '';
+          return `${h(v.insumoNome || v.insumoId || '-')}: ${s}${fmtMoeda(v.variacaoValor)} (${s}${fmtQtdFicha(v.variacaoPct)}%)`;
+        }).join('<br>') || '-';
+        return `<tr>
+          <td><strong>${h(produto || '-')}</strong></td>
+          <td class="num">${fmtMoeda(c.valorAnterior)}</td>
+          <td class="num strong">${fmtMoeda(c.valorUnitario)}</td>
+          <td class="num">${sinal}${fmtMoeda(c.variacaoValor)}</td>
+          <td class="num">${sinal}${fmtQtdFicha(c.variacaoPct)}%</td>
+          <td>${top}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+}
+
+async function gerarPreviewRelatorioCustosFichas(){
+  if(!ftMateriaisCarregados) await carregarMateriaisFichaTecnica();
+  const dataRelatorio = hoje();
+  const relatorioId = 'PREVIEW-' + novoId();
+  const criadoEm = new Date().toISOString();
+  const produtosPorId = {};
+  (S.produtos || []).forEach(p => { produtosPorId[String(p.id)] = p; });
+  const fichasPorProduto = {};
+  (S.fichasTecnicas || []).filter(f => String(f.ativo).toLowerCase() !== 'false').forEach(f => {
+    fichasPorProduto[String(f.produtoId)] = f;
+  });
+  const anteriorPorProduto = ultimoCustoFichaSinteticoPreview();
+  const analiticoAnterior = analiticoAnteriorCustoFichaPreview(anteriorPorProduto);
+  const sinteticos = [];
+  const analiticos = [];
+  const comparacoes = [];
+  let ignorados = 0;
+  let insumosSemPrecoWms = 0;
+
+  Object.keys(fichasPorProduto).forEach(produtoId => {
+    const ficha = fichasPorProduto[produtoId];
+    const produto = produtosPorId[produtoId];
+    if(!ficha || !produto){ ignorados++; return; }
+    let ingredientes = [];
+    try{ ingredientes = JSON.parse(ficha.jsonIngredientes || '[]'); }catch(e){ ingredientes = []; }
+    if(!ingredientes.length){ ignorados++; return; }
+
+    const detalhados = ingredientes.map(i => {
+      const valorUnit = valorUnitInsumoFicha(i);
+      const qtd = parseNumeroBR(i.qtd);
+      if(!(valorUnit > 0)) insumosSemPrecoWms++;
+      return {
+        insumoId:String(i.id || ''),
+        insumoNome:String(i.nome || ''),
+        cat:String(i.cat || ''),
+        qtd,
+        unidadeComercial:String(i.unidadeComercial || i.unSi || ''),
+        valorUnit,
+        custo:qtd * valorUnit
+      };
+    }).sort((a,b) => b.custo - a.custo);
+
+    const valorUnitario = detalhados.reduce((acc,i) => acc + safeNum(i.custo), 0);
+    const antProd = anteriorPorProduto[produtoId] || {};
+    const valorAnterior = parseNumeroBR(antProd.valorUnitario);
+    const variacaoValor = valorUnitario - valorAnterior;
+    const variacaoPct = valorAnterior > 0 ? (variacaoValor / valorAnterior) * 100 : (valorUnitario > 0 ? 100 : 0);
+    const anterioresInsumos = analiticoAnterior[produtoId] || {};
+    const variacoesInsumos = detalhados.map(i => {
+      const ant = anterioresInsumos[chaveInsumoCustoPreview(i.insumoId, i.insumoNome)] || {};
+      const custoAnterior = parseNumeroBR(ant.custoUnitario);
+      const variacaoValor = i.custo - custoAnterior;
+      const variacaoPct = custoAnterior > 0 ? (variacaoValor / custoAnterior) * 100 : (i.custo > 0 ? 100 : 0);
+      return {insumoId:i.insumoId, insumoNome:i.insumoNome, custoAnterior, custoAtual:i.custo, variacaoValor, variacaoPct};
+    }).sort((a,b) => Math.abs(b.variacaoValor) - Math.abs(a.variacaoValor));
+    const topVariacoes = variacoesInsumos.filter(v => Math.abs(safeNum(v.variacaoValor)) > 0.000001).slice(0,5);
+    const base = {
+      relatorioId,
+      dataRelatorio,
+      produtoId,
+      produtoCod:String(ficha.produtoCod || produto.cod || ''),
+      produtoNome:String(ficha.produtoNome || produto.nome || ''),
+      fichaId:String(ficha.id || ''),
+    };
+
+    sinteticos.push({...base, valorUnitario, valorAnterior, variacaoValor, variacaoPct, insumosVariacao:JSON.stringify(topVariacoes), qtdInsumos:detalhados.length, criadoEm, ativo:true});
+    detalhados.forEach(i => {
+      const ant = anterioresInsumos[chaveInsumoCustoPreview(i.insumoId, i.insumoNome)] || {};
+      const custoAnterior = parseNumeroBR(ant.custoUnitario);
+      const variacaoInsumoValor = i.custo - custoAnterior;
+      const variacaoInsumoPct = custoAnterior > 0 ? (variacaoInsumoValor / custoAnterior) * 100 : (i.custo > 0 ? 100 : 0);
+      analiticos.push({...base, insumoId:i.insumoId, insumoNome:i.insumoNome, cat:i.cat, qtdUnidade:i.qtd, unidadeComercial:i.unidadeComercial, valorUnitInsumo:i.valorUnit, custoUnitario:i.custo, pctCusto:valorUnitario > 0 ? (i.custo / valorUnitario) * 100 : 0, custoAnterior, variacaoValor:variacaoInsumoValor, variacaoPct:variacaoInsumoPct, criadoEm, ativo:true});
+    });
+    comparacoes.push({...base, valorUnitario, valorAnterior, variacaoValor, variacaoPct, topVariacoes});
+  });
+
+  comparacoes.sort((a,b) => Math.abs(safeNum(b.variacaoValor)) - Math.abs(safeNum(a.variacaoValor)));
+  return {
+    ok:true,
+    preview:true,
+    relatorioId,
+    dataRelatorio,
+    sinteticos:sinteticos.length,
+    analiticos:analiticos.length,
+    ignorados,
+    comparacoes,
+    sinteticoRows:sinteticos,
+    analiticoRows:analiticos,
+    fontePrecos:'WMS aba Lotes coluna valorUnit',
+    wmsChavesPreco:(W.materiais || []).filter(m => parseNumeroBR(m.valorUnit) > 0).length,
+    insumosSemPrecoWms
+  };
+}
+
+function ultimoCustoFichaSinteticoPreview(){
+  const mapa = {};
+  (S.custosFichaSintetico || []).filter(r => String(r.ativo).toLowerCase() !== 'false').forEach(r => {
+    const produtoId = String(r.produtoId || '');
+    if(!produtoId) return;
+    const atual = mapa[produtoId];
+    const ordem = String(r.dataRelatorio || '') + '|' + String(r.criadoEm || '') + '|' + String(r.relatorioId || '');
+    const ordemAtual = atual ? String(atual.dataRelatorio || '') + '|' + String(atual.criadoEm || '') + '|' + String(atual.relatorioId || '') : '';
+    if(!atual || ordem >= ordemAtual) mapa[produtoId] = r;
+  });
+  return mapa;
+}
+
+function analiticoAnteriorCustoFichaPreview(anteriorPorProduto){
+  const out = {};
+  (S.custosFichaAnalitico || []).filter(r => String(r.ativo).toLowerCase() !== 'false').forEach(r => {
+    const produtoId = String(r.produtoId || '');
+    const ant = anteriorPorProduto[produtoId];
+    if(!ant || String(ant.relatorioId) !== String(r.relatorioId)) return;
+    if(!out[produtoId]) out[produtoId] = {};
+    out[produtoId][chaveInsumoCustoPreview(r.insumoId, r.insumoNome)] = r;
+  });
+  return out;
+}
+
+function chaveInsumoCustoPreview(id, nome){
+  return String(id || '').trim() || normalizarTextoFicha(nome || '');
+}
+
+async function exportarRelatorioCustosCsv(tipo){
+  try{
+    if(!relCustosPreviewAtual){
+      mostrarLoading(true, 'Calculando relatorio para exportacao...');
+      relCustosPreviewAtual = await gerarPreviewRelatorioCustosFichas();
+      renderRelatorioCustosFichasResultado(relCustosPreviewAtual, {
+        titulo: 'Pre-visualizacao',
+        aviso: 'Relatorio calculado para exportacao.'
+      });
+    }
+    const rel = relCustosPreviewAtual;
+    const analitico = tipo === 'analitico';
+    const rows = analitico ? (rel.analiticoRows || []) : (rel.sinteticoRows || []);
+    if(!rows.length){ notify('Nenhuma linha para exportar.','warn'); return; }
+    const campos = analitico
+      ? [
+        ['dataRelatorio','Data'], ['relatorioId','Relatorio'], ['produtoCod','Codigo'], ['produtoNome','Produto'], ['fichaId','Ficha'],
+        ['insumoId','Insumo ID'], ['insumoNome','Insumo'], ['cat','Categoria'], ['qtdUnidade','Qtd/unidade'], ['unidadeComercial','Unidade comercial'],
+        ['valorUnitInsumo','Valor WMS'], ['custoUnitario','Custo'], ['pctCusto','% custo'], ['custoAnterior','Custo anterior'], ['variacaoValor','Variacao R$'], ['variacaoPct','Variacao %']
+      ]
+      : [
+        ['dataRelatorio','Data'], ['relatorioId','Relatorio'], ['produtoCod','Codigo'], ['produtoNome','Produto'], ['fichaId','Ficha'],
+        ['valorUnitario','Valor unitario'], ['valorAnterior','Valor anterior'], ['variacaoValor','Variacao R$'], ['variacaoPct','Variacao %'], ['qtdInsumos','Qtd insumos'], ['insumosVariacao','Insumos variacao']
+      ];
+    const csv = [
+      campos.map(c => csvCampo(c[1])).join(';'),
+      ...rows.map(row => campos.map(c => csvCampo(row[c[0]])).join(';'))
+    ].join('\r\n');
+    const blob = new Blob(['\ufeff' + csv], {type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relatorio_custos_fichas_${tipo}_${hoje()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    notify(`CSV ${analitico ? 'analitico' : 'sintetico'} gerado.`);
+  }catch(e){
+    notify((e && e.message) || String(e), 'error');
+  }finally{
+    mostrarLoading(false);
+  }
+}
+
+function csvCampo(v){
+  if(v === null || v === undefined) return '';
+  let txt = typeof v === 'number'
+    ? String(v).replace('.', ',')
+    : String(v);
+  txt = txt.replace(/\r?\n/g, ' ').replace(/"/g, '""');
+  return /[;"\n\r]/.test(txt) ? `"${txt}"` : txt;
+}
+
+async function imprimirRelatorioCustosFichas(tipo){
+  try{
+    if(!relCustosPreviewAtual){
+      mostrarLoading(true, 'Calculando relatorio para impressao...');
+      relCustosPreviewAtual = await gerarPreviewRelatorioCustosFichas();
+      renderRelatorioCustosFichasResultado(relCustosPreviewAtual, {
+        titulo: 'Pre-visualizacao',
+        aviso: 'Relatorio calculado para impressao.'
+      });
+    }
+    const html = montarHtmlImpressaoRelatorioCustos(relCustosPreviewAtual, tipo);
+    const win = window.open('', '_blank', 'width=1000,height=750');
+    if(!win) throw new Error('O navegador bloqueou a janela de impressao. Libere pop-ups para este arquivo e tente novamente.');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 600);
+  }catch(e){
+    notify((e && e.message) || String(e), 'error');
+  }finally{
+    mostrarLoading(false);
+  }
+}
+
+function montarHtmlImpressaoRelatorioCustos(rel, tipo){
+  const analitico = tipo === 'analitico';
+  const titulo = analitico ? 'Relatorio Analitico de Custos das Fichas Tecnicas' : 'Relatorio Sintetico de Custos das Fichas Tecnicas';
+  const sinteticos = (rel.sinteticoRows || []).slice().sort((a,b) =>
+    String(a.produtoCod || '').localeCompare(String(b.produtoCod || ''), 'pt-BR', {numeric:true})
+    || String(a.produtoNome || '').localeCompare(String(b.produtoNome || ''), 'pt-BR')
+  );
+  const analiticos = (rel.analiticoRows || []).slice().sort((a,b) =>
+    String(a.produtoCod || '').localeCompare(String(b.produtoCod || ''), 'pt-BR', {numeric:true})
+    || safeNum(b.custoUnitario) - safeNum(a.custoUnitario)
+  );
+  const anaPorProduto = {};
+  analiticos.forEach(i => {
+    const key = String(i.produtoId || i.produtoCod || i.produtoNome || '');
+    if(!anaPorProduto[key]) anaPorProduto[key] = [];
+    anaPorProduto[key].push(i);
+  });
+  const meta = `Data: ${fmtBR(rel.dataRelatorio || hoje())} | Produtos: ${safeNum(rel.sinteticos)} | Itens analiticos: ${safeNum(rel.analiticos)} | Fonte: ${h(rel.fontePrecos || 'WMS')}`;
+
+  const body = analitico
+    ? sinteticos.map(p => {
+      const key = String(p.produtoId || p.produtoCod || p.produtoNome || '');
+      const itens = anaPorProduto[key] || [];
+      return `<section class="produto-block">
+        <h2>${h(linhaProdutoRelatorio(p))}</h2>
+        <table class="analitico">
+          <thead><tr><th>ID</th><th>Insumo</th><th>Categoria</th><th>Qtd</th><th>Unidade</th><th>Valor WMS</th><th>Custo</th><th>%</th></tr></thead>
+          <tbody>${itens.map(i => `<tr>
+            <td>${h(i.insumoId || '-')}</td>
+            <td>${h(i.insumoNome || '-')}</td>
+            <td>${h(i.cat || '-')}</td>
+            <td class="num">${fmtQtdFicha(i.qtdUnidade)}</td>
+            <td>${h(i.unidadeComercial || '-')}</td>
+            <td class="num">${fmtMoeda(i.valorUnitInsumo)}</td>
+            <td class="num strong">${fmtMoeda(i.custoUnitario)}</td>
+            <td class="num">${fmtQtdFicha(i.pctCusto)}%</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </section>`;
+    }).join('')
+    : `<section class="sintetico-list">${sinteticos.map(p => `
+        ${htmlCardSinteticoRelatorio(p)}
+      `).join('')}</section>`;
+
+  return `<!doctype html><html><head><meta charset="utf-8">
+    <title>${h(titulo)}</title>
+    <link rel="icon" type="image/png" href="${LOGO_URL}">
+    <style>
+      @page{size:A4;margin:10mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#15231b;margin:0;background:#fff;font-size:11px}
+      .print-header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #1a5c38;padding-bottom:10px;margin-bottom:10px}
+      .print-logo{width:54px;height:54px;object-fit:contain}
+      h1{font-size:18px;margin:0 0 4px;color:#1a5c38}
+      .meta{font-size:11px;color:#53635a;line-height:1.35}
+      .summary{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px;font-size:11px;color:#26352d}
+      .summary span{border:1px solid #d8e3dc;border-radius:4px;padding:5px 8px;background:#f7faf8}
+      .sintetico-list{display:flex;flex-direction:column;gap:5px}
+      .sintetico-card{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #d8e3dc;border-left:3px solid #1a5c38;border-radius:4px;padding:7px 9px;break-inside:avoid;page-break-inside:avoid}
+      .sintetico-main{display:flex;align-items:center;gap:8px;min-width:0}
+      .sintetico-cod{font-size:10px;font-weight:800;color:#fff;background:#1a5c38;border-radius:3px;padding:3px 6px;white-space:nowrap}
+      .sintetico-produto{font-size:12px;font-weight:700;line-height:1.22}
+      .sintetico-metrics{display:flex;align-items:center;gap:12px;white-space:nowrap}
+      .sintetico-metrics span{display:flex;flex-direction:column;align-items:flex-end}
+      .sintetico-metrics small{font-size:8px;color:#66746c;text-transform:uppercase;letter-spacing:.02em}
+      .sintetico-metrics strong{font-size:12px;color:#24342b}
+      .sintetico-metrics .total strong{font-size:14px;color:#1a5c38}
+      .produto-block{break-inside:avoid;page-break-inside:avoid;margin:0 0 13px}
+      .produto-block h2{font-size:14px;line-height:1.25;margin:0 0 5px;color:#163a27;border-bottom:1px solid #9fb9aa;padding-bottom:4px}
+      table{width:100%;border-collapse:collapse}
+      .analitico th{background:#eef5f1;color:#1a5c38;font-size:9px;text-align:left;border:1px solid #cad8d0;padding:4px}
+      .analitico td{font-size:9px;border:1px solid #dfe7e2;padding:3px 4px;vertical-align:top}
+      .analitico .num{text-align:right;white-space:nowrap}
+      .analitico .strong{font-weight:700;color:#163a27}
+      .footer{margin-top:14px;border-top:1px solid #d9e2dc;padding-top:6px;font-size:9px;color:#66746c}
+      .no-print{margin:12px 0}
+      .no-print button{padding:8px 18px;border:0;background:#1a5c38;color:#fff;border-radius:4px;cursor:pointer}
+      @media print{.no-print{display:none} body{font-size:10px}}
+    </style>
+  </head><body>
+    <div class="print-header">
+      <img class="print-logo" src="${LOGO_URL}" alt="Explosao Alimentos">
+      <div><h1>${h(titulo)}</h1><div class="meta">${meta}<br>Gerado em ${new Date().toLocaleString('pt-BR')}</div></div>
+    </div>
+    <div class="summary">
+      <span>Total de produtos: <strong>${safeNum(rel.sinteticos)}</strong></span>
+      <span>Itens analiticos: <strong>${safeNum(rel.analiticos)}</strong></span>
+      <span>Insumos sem preco: <strong>${safeNum(rel.insumosSemPrecoWms)}</strong></span>
+    </div>
+    ${body || '<p>Nenhum dado para imprimir.</p>'}
+    <div class="footer">PMS - Production Management System | Relatorio calculado a partir das fichas tecnicas do PMS e precos do WMS.</div>
+    <div class="no-print"><button onclick="window.print()">Imprimir</button></div>
+  </body></html>`;
+}
+
+function linhaProdutoRelatorio(p){
+  const nome = p.produtoCod ? `${p.produtoCod} - ${p.produtoNome}` : (p.produtoNome || '-');
+  return `${nome} - Itens: ${safeNum(p.qtdInsumos)} | Custo total: ${fmtMoeda(p.valorUnitario)}`;
+}
+
+async function salvarRelatorioCustosFichas(){
+  const btn = document.getElementById('btn-salvar-rel-custos-ft');
+  const box = document.getElementById('ft-rel-custos-status');
+  if(btn) btn.disabled = true;
+  if(box){
+    box.className = 'empty';
+    box.style.padding = '12px';
+    box.textContent = 'Salvando relatorio de custos...';
+  }
+  mostrarLoading(true, 'Salvando relatorio de custos das fichas...');
+  try{
+    const preview = await gerarPreviewRelatorioCustosFichas();
+    relCustosPreviewAtual = preview;
+    renderRelatorioCustosFichasResultado(preview, {
+      titulo: 'Pre-visualizacao antes do salvamento',
+      aviso: 'Relatorio calculado na tela. Tentando salvar no Sheets...'
+    });
+    await gsCall({action:'inicializarCustosFichas'});
+    const payloadSalvar = {dataRelatorio:hoje(), modo:'salvarFechamentoCustosFichas'};
+    let r = await gsCall({action:'salvarFechamentoCustosFichas', data:payloadSalvar});
+    if(erroAcaoDesconhecida(r, 'salvarFechamentoCustosFichas')){
+      r = await gsCall({action:'pmsRelCustosSalvarV425', data:{dataRelatorio:hoje(), modo:'pmsRelCustosSalvarV425'}});
+    }
+    if(erroAcaoDesconhecida(r, 'pmsRelCustosSalvarV425')){
+      r = await salvarRelatorioCustosViaSaveCadastro(preview);
+    }
+    if(!r || !r.ok){
+      let erro = (r && r.error) || 'Falha ao salvar relatorio de custos.';
+      if(erroAcaoDesconhecida(r, 'salvarFechamentoCustosFichas') || erroAcaoDesconhecida(r, 'pmsRelCustosSalvarV425')){
+        erro = 'A URL publicada ainda nao reconhece o fechamento de custos. O backend que respondeu nao e o PMS Script.txt Rev 4.25.';
+      }
+      renderRelatorioCustosFichasResultado(preview, {
+        titulo: 'Pre-visualizacao mantida',
+        aviso: erro
+      });
+      notify(erro, 'error');
+      return;
+    }
+    notify(`Relatorio ${r.relatorioId} salvo.`);
+    renderRelatorioCustosFichasResultado(r, {
+      titulo: 'Relatorio salvo no Sheets',
+      aviso: 'Salvo nas abas custos_fichas_sintetico e custos_fichas_analitico.'
+    });
+    await sincronizar(true);
+  }catch(e){
+    const msg = e && e.message ? e.message : String(e);
+    if(box) box.textContent = msg;
+    notify(msg, 'error');
+  }finally{
+    mostrarLoading(false);
+    if(btn) btn.disabled = false;
+  }
+}
+
+async function pmsRelCustosSalvarV418(){
+  return salvarRelatorioCustosFichas();
+}
+
+function prepararRelatorioCustosParaSalvar(preview){
+  const relatorioId = 'RCF-' + novoId();
+  const dataRelatorio = hoje();
+  const criadoEm = new Date().toISOString();
+  const sinteticoRows = (preview.sinteticoRows || []).map(r => ({
+    relatorioId,
+    dataRelatorio,
+    produtoId:String(r.produtoId || ''),
+    produtoCod:String(r.produtoCod || ''),
+    produtoNome:String(r.produtoNome || ''),
+    fichaId:String(r.fichaId || ''),
+    valorUnitario:safeNum(r.valorUnitario),
+    valorAnterior:safeNum(r.valorAnterior),
+    variacaoValor:safeNum(r.variacaoValor),
+    variacaoPct:safeNum(r.variacaoPct),
+    insumosVariacao:typeof r.insumosVariacao === 'string' ? r.insumosVariacao : JSON.stringify(r.insumosVariacao || []),
+    qtdInsumos:safeNum(r.qtdInsumos),
+    criadoEm,
+    ativo:true
+  }));
+  const analiticoRows = (preview.analiticoRows || []).map(r => ({
+    relatorioId,
+    dataRelatorio,
+    produtoId:String(r.produtoId || ''),
+    produtoCod:String(r.produtoCod || ''),
+    produtoNome:String(r.produtoNome || ''),
+    fichaId:String(r.fichaId || ''),
+    insumoId:String(r.insumoId || ''),
+    insumoNome:String(r.insumoNome || ''),
+    cat:String(r.cat || ''),
+    qtdUnidade:safeNum(r.qtdUnidade),
+    unidadeComercial:String(r.unidadeComercial || ''),
+    valorUnitInsumo:safeNum(r.valorUnitInsumo),
+    custoUnitario:safeNum(r.custoUnitario),
+    pctCusto:safeNum(r.pctCusto),
+    custoAnterior:safeNum(r.custoAnterior),
+    variacaoValor:safeNum(r.variacaoValor),
+    variacaoPct:safeNum(r.variacaoPct),
+    criadoEm,
+    ativo:true
+  }));
+  return {...preview, preview:false, relatorioId, dataRelatorio, sinteticoRows, analiticoRows, sinteticos:sinteticoRows.length, analiticos:analiticoRows.length};
+}
+
+async function salvarRelatorioCustosViaSaveCadastro(preview){
+  const porModo = await gsCallSemOverlay({action:'saveCadastro', data:{modo:'salvarFechamentoCustosFichas', dataRelatorio:hoje()}});
+  if(porModo && porModo.ok) return porModo;
+  const erroModo = String((porModo && porModo.error) || '');
+  if(/tipo inv/i.test(erroModo) || erroAcaoDesconhecida(porModo, 'saveCadastro')){
+    return {ok:false, error:'O saveCadastro publicado ainda e antigo e nao reconhece fechamento de custos. Ele precisa responder a Rev 4.25 para criar/gravar as abas custos_fichas_sintetico e custos_fichas_analitico.'};
+  }
+
+  const rel = prepararRelatorioCustosParaSalvar(preview);
+  const total = rel.sinteticoRows.length + rel.analiticoRows.length;
+  if(!total) return {ok:false, error:'Nao ha linhas de custo para salvar.'};
+
+  let gravadas = 0;
+  for(const row of rel.sinteticoRows){
+    gravadas++;
+    if(gravadas === 1 || gravadas % 25 === 0) mostrarLoading(true, `Salvando fechamento no Sheets... ${gravadas}/${total}`);
+    const r = await gsCallSemOverlay({action:'saveCadastro', data:{tipo:'custosFichaSintetico', item:row}});
+    if(!r || !r.ok){
+      return {ok:false, error:`Fallback saveCadastro falhou no sintetico: ${(r && r.error) || 'sem resposta'}. A URL publicada ainda nao tem suporte as abas de custo da Rev 4.25.`};
+    }
+  }
+  for(const row of rel.analiticoRows){
+    gravadas++;
+    if(gravadas % 25 === 0) mostrarLoading(true, `Salvando fechamento no Sheets... ${gravadas}/${total}`);
+    const r = await gsCallSemOverlay({action:'saveCadastro', data:{tipo:'custosFichaAnalitico', item:row}});
+    if(!r || !r.ok){
+      return {ok:false, error:`Fallback saveCadastro falhou no analitico: ${(r && r.error) || 'sem resposta'}. A URL publicada ainda nao tem suporte as abas de custo da Rev 4.25.`};
+    }
+  }
+  return {
+    ok:true,
+    relatorioId:rel.relatorioId,
+    dataRelatorio:rel.dataRelatorio,
+    sinteticos:rel.sinteticos,
+    analiticos:rel.analiticos,
+    ignorados:rel.ignorados,
+    comparacoes:rel.comparacoes,
+    sinteticoRows:rel.sinteticoRows,
+    analiticoRows:rel.analiticoRows,
+    fontePrecos:rel.fontePrecos,
+    wmsChavesPreco:rel.wmsChavesPreco,
+    insumosSemPrecoWms:rel.insumosSemPrecoWms,
+    fallbackSaveCadastro:true
+  };
+}
+
+
+function renderRelatorioCustosFichasResultado(r, opts){
+  opts = opts || {};
+  const box = document.getElementById('ft-rel-custos-status');
+  if(!box) return;
+  const titulo = opts.titulo || (r.preview ? 'Pre-visualizacao' : 'Relatorio salvo');
+  const aviso = opts.aviso ? `<div style="margin-top:6px;color:${/erro|falh|nao|não|antigo/i.test(opts.aviso) ? 'var(--danger)' : 'var(--text2)'}">${h(opts.aviso)}</div>` : '';
+  const podeReabrir = !!relCustosPreviewAtual;
+  box.className = '';
+  box.style.padding = '12px';
+  box.innerHTML = `
+    <div style="font-size:12px;color:var(--text2);line-height:1.45">
+      <strong>${h(titulo)}</strong> | Relatorio <strong>${h(r.relatorioId)}</strong> | Data ${fmtBR(r.dataRelatorio)}.
+      Sintetico: ${safeNum(r.sinteticos)} produtos | Analitico: ${safeNum(r.analiticos)} insumos | Ignorados: ${safeNum(r.ignorados)}.
+      <br>Precos: ${h(r.fontePrecos || 'WMS')} | Chaves WMS: ${safeNum(r.wmsChavesPreco)} | Insumos sem preco: ${safeNum(r.insumosSemPrecoWms)}.
+      ${aviso}
+      <div class="btn-row" style="margin-top:8px">
+        ${podeReabrir ? '<button class="btn" onclick="abrirPopupPreviewRelatorioCustosFichas(relCustosPreviewAtual)">Abrir previa em popup</button>' : ''}
+        <button class="btn" onclick="limparPreviewRelatorioCustosFichas()">Limpar previa</button>
+      </div>
+    </div>`;
+}
+
+function chaveProdutoRelatorioCusto(r){
+  return String(r.produtoId || '').trim()
+    || String(r.produtoCod || '').trim()
+    || normalizarTextoFicha(r.produtoNome || '');
+}
+
+function chaveInsumoRelatorioCusto(r){
+  return String(r.insumoId || '').trim()
+    || normalizarTextoFicha(r.insumoNome || '');
+}
+
+function sinalMoeda(v){
+  const n = safeNum(v);
+  return (n > 0 ? '+' : '') + fmtMoeda(n);
+}
+
+function sinalPct(v){
+  const n = safeNum(v);
+  return (n > 0 ? '+' : '') + fmtQtdFicha(n) + '%';
+}
+
+function linhasSinteticoRelatorio(relId){
+  return (S.custosFichaSintetico || []).filter(r =>
+    String(r.ativo).toLowerCase() !== 'false' && String(r.relatorioId) === String(relId)
+  );
+}
+
+function linhasAnaliticoRelatorio(relId){
+  return (S.custosFichaAnalitico || []).filter(r =>
+    String(r.ativo).toLowerCase() !== 'false' && String(r.relatorioId) === String(relId)
+  );
+}
+
+function mapaPorProduto(rows){
+  const out = {};
+  (rows || []).forEach(r => {
+    const key = chaveProdutoRelatorioCusto(r);
+    if(key) out[key] = r;
+  });
+  return out;
+}
+
+function mapaAnaliticoPorProduto(relId){
+  const out = {};
+  linhasAnaliticoRelatorio(relId).forEach(r => {
+    const prodKey = chaveProdutoRelatorioCusto(r);
+    const insKey = chaveInsumoRelatorioCusto(r);
+    if(!prodKey || !insKey) return;
+    if(!out[prodKey]) out[prodKey] = {};
+    out[prodKey][insKey] = r;
+  });
+  return out;
+}
+
+function montarComparacaoRelatoriosCustos(baseId, atualId){
+  const rels = listarFechamentosCustosFichas();
+  const metaBase = rels.find(r => String(r.id) === String(baseId));
+  const metaAtual = rels.find(r => String(r.id) === String(atualId));
+  if(!baseId || !atualId) throw new Error('Selecione os dois relatorios para comparar.');
+  if(String(baseId) === String(atualId)) throw new Error('Selecione relatorios diferentes.');
+  const baseMap = mapaPorProduto(linhasSinteticoRelatorio(baseId));
+  const atualMap = mapaPorProduto(linhasSinteticoRelatorio(atualId));
+  const anaBase = mapaAnaliticoPorProduto(baseId);
+  const anaAtual = mapaAnaliticoPorProduto(atualId);
+  const keys = Array.from(new Set([...Object.keys(baseMap), ...Object.keys(atualMap)]));
+  const rows = keys.map(key => {
+    const b = baseMap[key] || {};
+    const a = atualMap[key] || {};
+    const valorBase = parseNumeroBR(b.valorUnitario);
+    const valorAtual = parseNumeroBR(a.valorUnitario);
+    const variacaoValor = valorAtual - valorBase;
+    const variacaoPct = valorBase > 0 ? (variacaoValor / valorBase) * 100 : (valorAtual > 0 ? 100 : 0);
+    const produtoCod = String(a.produtoCod || b.produtoCod || '');
+    const produtoNome = String(a.produtoNome || b.produtoNome || '-');
+    const produto = produtoCod ? `${produtoCod} - ${produtoNome}` : produtoNome;
+    const insBase = anaBase[key] || {};
+    const insAtual = anaAtual[key] || {};
+    const insKeys = Array.from(new Set([...Object.keys(insBase), ...Object.keys(insAtual)]));
+    const motivos = insKeys.map(insKey => {
+      const ib = insBase[insKey] || {};
+      const ia = insAtual[insKey] || {};
+      const custoBase = parseNumeroBR(ib.custoUnitario);
+      const custoAtual = parseNumeroBR(ia.custoUnitario);
+      const delta = custoAtual - custoBase;
+      return {
+        insumoId:String(ia.insumoId || ib.insumoId || ''),
+        insumoNome:String(ia.insumoNome || ib.insumoNome || '-'),
+        cat:String(ia.cat || ib.cat || ''),
+        custoBase,
+        custoAtual,
+        delta,
+        pct: custoBase > 0 ? (delta / custoBase) * 100 : (custoAtual > 0 ? 100 : 0)
+      };
+    }).filter(i => Math.abs(i.delta) > 0.000001).sort((x,y) => Math.abs(y.delta) - Math.abs(x.delta));
+    return {key, produtoCod, produtoNome, produto, valorBase, valorAtual, variacaoValor, variacaoPct, motivos};
+  }).sort((a,b) => Math.abs(b.variacaoValor) - Math.abs(a.variacaoValor));
+  return {
+    baseId,
+    atualId,
+    metaBase,
+    metaAtual,
+    rows,
+    geradoEm: new Date().toISOString()
+  };
+}
+
+function fraseMotivoComparacao(row){
+  if(!row.valorBase && row.valorAtual) return 'Produto entrou no relatorio atual.';
+  if(row.valorBase && !row.valorAtual) return 'Produto nao aparece no relatorio atual.';
+  if(Math.abs(safeNum(row.variacaoValor)) < 0.000001) return 'Sem variacao relevante.';
+  if(!row.motivos.length) return 'Sem detalhe analitico suficiente para explicar a variacao.';
+  const tipo = row.variacaoValor > 0 ? 'Aumento explicado principalmente por ' : 'Reducao explicada principalmente por ';
+  return tipo + row.motivos.slice(0, 3).map(m =>
+    `${m.insumoNome} (${sinalMoeda(m.delta)}, ${sinalPct(m.pct)})`
+  ).join('; ') + '.';
+}
+
+function compararRelatoriosCustosFichas(){
+  try{
+    const baseId = document.getElementById('ft-rel-base')?.value || '';
+    const atualId = document.getElementById('ft-rel-comparar')?.value || '';
+    const cmp = montarComparacaoRelatoriosCustos(baseId, atualId);
+    relCustosComparacaoAtual = cmp;
+    renderComparacaoRelatoriosCustos(cmp);
+  }catch(e){
+    const box = document.getElementById('ft-rel-comparacao-status');
+    if(box){ box.className='empty'; box.style.padding='12px'; box.textContent = e.message || String(e); }
+    notify(e.message || String(e), 'error');
+  }
+}
+
+function renderComparacaoRelatoriosCustos(cmp){
+  const box = document.getElementById('ft-rel-comparacao-status');
+  if(!box) return;
+  const rows = (cmp.rows || []).filter(r => Math.abs(safeNum(r.variacaoValor)) > 0.000001);
+  box.className = '';
+  box.style.padding = '0';
+  box.innerHTML = `
+    <div style="padding:12px;font-size:12px;color:var(--text2);line-height:1.45">
+      <strong>Comparacao:</strong> ${h(cmp.baseId)} (${fmtBR(cmp.metaBase && cmp.metaBase.data)}) x ${h(cmp.atualId)} (${fmtBR(cmp.metaAtual && cmp.metaAtual.data)})
+      <br>Produtos com variacao: <strong>${rows.length}</strong>. A analise abaixo mostra a diferenca por produto e os principais insumos que explicam a mudanca.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Produto</th><th>Custo base</th><th>Custo atual</th><th>Dif.</th><th>%</th><th>Motivo principal</th></tr></thead>
+        <tbody>${rows.length ? rows.slice(0, 35).map(r => `
+          <tr>
+            <td style="font-weight:700">${h(r.produto)}</td>
+            <td>${fmtMoeda(r.valorBase)}</td>
+            <td><strong>${fmtMoeda(r.valorAtual)}</strong></td>
+            <td>${sinalMoeda(r.variacaoValor)}</td>
+            <td>${sinalPct(r.variacaoPct)}</td>
+            <td style="font-size:12px">${h(fraseMotivoComparacao(r))}</td>
+          </tr>
+        `).join('') : '<tr><td colspan="6" class="empty">Sem variacao entre os relatorios selecionados.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+function imprimirComparacaoRelatoriosCustosFichas(){
+  try{
+    if(!relCustosComparacaoAtual) compararRelatoriosCustosFichas();
+    if(!relCustosComparacaoAtual) return;
+    const html = montarHtmlComparacaoRelatoriosCustos(relCustosComparacaoAtual);
+    const win = window.open('', '_blank', 'width=1100,height=780');
+    if(!win) throw new Error('O navegador bloqueou a janela de impressao. Libere pop-ups para este arquivo e tente novamente.');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 600);
+  }catch(e){
+    notify(e.message || String(e), 'error');
+  }
+}
+
+function montarHtmlComparacaoRelatoriosCustos(cmp){
+  const rows = (cmp.rows || []).filter(r => Math.abs(safeNum(r.variacaoValor)) > 0.000001);
+  return `<!doctype html><html><head><meta charset="utf-8">
+    <title>Comparacao de Custos das Fichas</title>
+    <link rel="icon" type="image/png" href="${LOGO_URL}">
+    <style>
+      @page{size:A4;margin:10mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#15231b;margin:0;background:#fff;font-size:11px}
+      .print-header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #1a5c38;padding-bottom:10px;margin-bottom:10px}
+      .print-logo{width:54px;height:54px;object-fit:contain}
+      h1{font-size:18px;margin:0 0 4px;color:#1a5c38}
+      .meta{font-size:11px;color:#53635a;line-height:1.35}
+      .summary{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px;font-size:11px;color:#26352d}
+      .summary span{border:1px solid #d8e3dc;border-radius:4px;padding:5px 8px;background:#f7faf8}
+      table{width:100%;border-collapse:collapse}
+      th{background:#eef5f1;color:#1a5c38;font-size:9px;text-align:left;border:1px solid #cad8d0;padding:4px}
+      td{font-size:9.5px;border:1px solid #dfe7e2;padding:4px;vertical-align:top}
+      .num{text-align:right;white-space:nowrap}
+      .produto{font-weight:700;color:#163a27}
+      .motivo{font-size:9px;color:#34443b;line-height:1.35}
+      .no-print{margin:12px 0;text-align:right}
+      .no-print button{padding:8px 18px;border:0;background:#1a5c38;color:#fff;border-radius:4px;cursor:pointer}
+      @media print{.no-print{display:none}}
+    </style>
+  </head><body>
+    <div class="print-header">
+      <img class="print-logo" src="${LOGO_URL}" alt="Explosao Alimentos">
+      <div>
+        <h1>Comparacao de Custos das Fichas</h1>
+        <div class="meta">Base: ${h(cmp.baseId)} (${fmtBR(cmp.metaBase && cmp.metaBase.data)}) | Atual: ${h(cmp.atualId)} (${fmtBR(cmp.metaAtual && cmp.metaAtual.data)})<br>Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+      </div>
+    </div>
+    <div class="summary">
+      <span>Produtos alterados: <strong>${rows.length}</strong></span>
+    </div>
+    <table>
+      <thead><tr><th>Produto</th><th>Custo base</th><th>Custo atual</th><th>Dif.</th><th>%</th><th>Explicacao</th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `
+        <tr>
+          <td class="produto">${h(r.produto)}</td>
+          <td class="num">${fmtMoeda(r.valorBase)}</td>
+          <td class="num"><strong>${fmtMoeda(r.valorAtual)}</strong></td>
+          <td class="num">${sinalMoeda(r.variacaoValor)}</td>
+          <td class="num">${sinalPct(r.variacaoPct)}</td>
+          <td class="motivo">${h(r.produtoNome)} custava ${fmtMoeda(r.valorBase)} e agora custa ${fmtMoeda(r.valorAtual)}. ${h(fraseMotivoComparacao(r))}</td>
+        </tr>`).join('') : '<tr><td colspan="6">Sem variacao entre os relatorios selecionados.</td></tr>'}</tbody>
+    </table>
+    <div class="no-print"><button onclick="window.print()">Imprimir</button></div>
+  </body></html>`;
 }
 
 function validarProporcaoFichaTecnica(){
