@@ -722,10 +722,10 @@ tr.div-neg td{background:#fdf0ee !important}
     <div class="card-title">📥 Importar Pedidos do Fácil123</div>
     <div class="upload-area" id="upload-area" onclick="document.getElementById('file-pedidos').click()" ondragover="ev.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="onDropPedidos(event)">
       <div class="upload-icon">📄</div>
-      <div class="upload-text"><strong>Clique ou arraste o arquivo CSV</strong><br>Exportado do Fácil123. Serão usados venda, situação, código, nome e quantidade.</div>
+      <div class="upload-text"><strong>Clique ou arraste o arquivo CSV</strong><br>Exportado do Fácil123. Serão usados venda, etapa, código, nome e quantidade.</div>
     </div>
     <input type="file" id="file-pedidos" accept=".csv,text/csv" style="display:none" onchange="onFilePedidos(event)">
-    <div id="pedidos-import-info" class="form-note" style="margin-top:10px">A importação ignora pedidos já existentes e importa somente situação Pendente.</div>
+    <div id="pedidos-import-info" class="form-note" style="margin-top:10px">A importação usa a coluna Etapa: inclui tudo, exceto Cancelados, Duplicar AGS, Pedido / Orçamento, Venda c/ Desconto Autorizado e Venda.</div>
   </div>
 
   <div class="card" id="card-preview-pedidos" style="display:none">
@@ -739,7 +739,7 @@ tr.div-neg td{background:#fdf0ee !important}
     <div id="preview-pedidos-info" style="font-size:12px;color:var(--text2);margin-bottom:10px"></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Venda</th><th>Situação</th><th>Código</th><th>Nome Fácil123</th><th>Produto PMS</th><th>Qtd</th><th>Volume kg</th><th>Status</th></tr></thead>
+        <thead><tr><th>Venda</th><th>Etapa</th><th>Código</th><th>Nome Fácil123</th><th>Produto PMS</th><th>Qtd</th><th>Volume kg</th><th>Status</th></tr></thead>
         <tbody id="tbody-preview-pedidos"></tbody>
       </table>
     </div>
@@ -753,7 +753,7 @@ tr.div-neg td{background:#fdf0ee !important}
     <div id="pedidos-resumo" class="cards-grid" style="margin-bottom:12px"></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Venda</th><th>Situação</th><th>Código</th><th>Nome</th><th>Produto PMS</th><th>Qtd</th><th>Volume kg</th><th>Importado em</th><th></th></tr></thead>
+        <thead><tr><th>Venda</th><th>Etapa</th><th>Código</th><th>Nome</th><th>Produto PMS</th><th>Qtd</th><th>Volume kg</th><th>Importado em</th><th></th></tr></thead>
         <tbody id="tbody-pedidos"></tbody>
       </table>
     </div>
@@ -1183,8 +1183,8 @@ tr.div-neg td{background:#fdf0ee !important}
       <div>
         <h3 style="font-size:15px;color:var(--text);margin-bottom:6px">Planejamento e estoque</h3>
         <p><strong>Estoque Produto:</strong> acompanha saldo físico de produto acabado por SKU. Use contagens para ajustar divergências entre sistema e estoque real.</p>
-        <p><strong>Necessidade:</strong> cruza pedidos pendentes, estoque, produção disponível e ficha técnica para indicar o que falta produzir, empacotar e a expectativa total de insumos.</p>
-        <p><strong>Pedidos:</strong> importa o CSV do Fácil123 usando venda, situação, código, nome e quantidade. O vínculo com o PMS é feito automaticamente por código ou nome do produto final.</p>
+        <p><strong>Necessidade:</strong> cruza pedidos importados, estoque, produção disponível e ficha técnica para indicar o que falta produzir, empacotar e a expectativa total de insumos.</p>
+        <p><strong>Pedidos:</strong> importa o CSV do Fácil123 usando venda, etapa, código, nome e quantidade. A importação inclui os pedidos cuja etapa não esteja na lista de exclusão definida no menu. O vínculo com o PMS é feito automaticamente por código ou nome do produto final.</p>
       </div>
       <div>
         <h3 style="font-size:15px;color:var(--text);margin-bottom:6px">Ficha técnica e referência</h3>
@@ -1290,7 +1290,7 @@ tr.div-neg td{background:#fdf0ee !important}
 </div><!-- /main -->
 
 <div class="toast" id="toast"></div>
-<div id="app-version">Rev 4.26.2</div>
+<div id="app-version">Rev 4.27</div>
 
 <script>
 // ═══ CONFIG ═══════════════════════════════════════════════════════
@@ -1816,6 +1816,7 @@ function normPed(p){
     id:safeId(p.id),
     venda:String(p.venda || p.numPedido || ''),
     situacao:String(p.situacao || p.status || ''),
+    etapa:String(p.etapa || ''),
     codigo:String(p.codigo || p.codProduto || p.produtoCod || ''),
     nome:String(p.nome || p.nomeFacil || p.produtoNome || ''),
     quantidade,
@@ -3899,13 +3900,13 @@ function renderPedidos(){
   const totalKg=lista.reduce((a,p)=>a+safeNum(p.volumeKg),0);
   const resumo=document.getElementById('pedidos-resumo');
   if(resumo) resumo.innerHTML=`
-    <div class="stat-card"><div class="stat-label">Pedidos</div><div class="stat-value">${lista.length}</div><div class="stat-sub">linhas pendentes</div></div>
+    <div class="stat-card"><div class="stat-label">Pedidos</div><div class="stat-value">${lista.length}</div><div class="stat-sub">linhas importadas</div></div>
     <div class="stat-card ok"><div class="stat-label">Vinculados</div><div class="stat-value">${vinculados}</div><div class="stat-sub">por código/nome</div></div>
     <div class="stat-card ${lista.length-vinculados?'danger':'ok'}"><div class="stat-label">Sem vínculo</div><div class="stat-value">${lista.length-vinculados}</div><div class="stat-sub">corrigir cadastro</div></div>
     <div class="stat-card"><div class="stat-label">Volume</div><div class="stat-value">${fmtQtdFicha(totalKg)}</div><div class="stat-sub">kg pedidos</div></div>`;
   tbody.innerHTML=lista.length?lista.map(p=>`<tr>
     <td><span class="badge b-lote">${h(p.venda||'—')}</span></td>
-    <td>${h(p.situacao||'—')}</td>
+    <td>${h(p.etapa||p.situacao||'—')}</td>
     <td>${h(p.codigo||'—')}</td>
     <td style="font-weight:600">${h(p.nome||'—')}</td>
     <td>${p.produtoId?`<span class="badge b-ok">${h(p.produtoNome || getProduto(p.produtoId))}</span>`:'<span class="badge b-warn">Sem vínculo</span>'}</td>
@@ -3930,6 +3931,18 @@ function onDropPedidos(e){
 
 function normalizarTextoBusca(v){
   return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+}
+
+const ETAPAS_PEDIDOS_IGNORADAS = new Set([
+  'Cancelados',
+  'Duplicar AGS',
+  'Pedido / Orçamento',
+  'Venda c/ Desconto Autorizado',
+  'Venda'
+].map(normalizarTextoBusca));
+
+function deveImportarPedidoPorEtapa(etapa){
+  return !ETAPAS_PEDIDOS_IGNORADAS.has(normalizarTextoBusca(etapa));
 }
 
 function scoreMojibake(txt){
@@ -4033,7 +4046,8 @@ function produtoPorCodigoNome(codigo,nome){
 function pedidoPreviewDeProduto(row, idx){
   const codigo=String(row[idx.codigo]||'').trim();
   const nome=String(row[idx.nomeProduto]||'').trim();
-  const situacao=String(row[idx.situacao]||'').trim();
+  const situacao=idx.situacao>=0 ? String(row[idx.situacao]||'').trim() : '';
+  const etapa=idx.etapa>=0 ? String(row[idx.etapa]||'').trim() : '';
   const quantidade=numeroFacil(row[idx.quantidade]);
   const prod=produtoPorCodigoNome(codigo,nome);
   const pesoPackg=safeNum(prod&&prod.pesoPackg);
@@ -4042,6 +4056,7 @@ function pedidoPreviewDeProduto(row, idx){
   return {
     venda:String(row[idx.venda]||'').trim(),
     situacao,
+    etapa,
     codigo,
     nome,
     quantidade,
@@ -4097,7 +4112,7 @@ async function salvarPedidosImportados(preview){
     }
     const erro = (r && r.error) || 'Falha ao salvar pedidos.';
     if(String(erro).toLowerCase().includes('op nao encontrada') || String(erro).toLowerCase().includes('op não encontrada')){
-      return {ok:false, error:'A URL publicada ainda responde com saveOP antigo. A importacao foi bloqueada antes de gravar em ordens_producao. No Apps Script, deixe apenas um doPost/handler ativo e use o PMS Script.txt Rev 4.25.'};
+      return {ok:false, error:'A URL publicada ainda responde com saveOP antigo. A importacao foi bloqueada antes de gravar em ordens_producao. No Apps Script, deixe apenas um doPost/handler ativo e use o PMS Script.txt Rev 4.27.'};
     }
     return {ok:false, error: erroAcaoDesconhecida(r, 'importarPedidosPMSFinal')
       ? 'A URL publicada ainda nao reconhece importarPedidosPMSFinal. Cole o arquivo ZZZZZ_IMPORTAR_PEDIDOS_PMS_FINAL.gs no FINAL do Apps Script ativo e publique a implantacao existente. Detalhe: '+erro
@@ -4122,22 +4137,25 @@ function lerCsvPedidos(file){
       if(rows.length<2){notify('CSV sem dados.','warn');return;}
       const headers=rows[0];
       const idxCodigo=idxCabecalhoFacil(headers,'código');
+      const idxEtapaHeader=idxCabecalhoFacil(headers,'etapa');
       const idx={
         venda:idxCabecalhoFacil(headers,'venda'),
         situacao:idxCabecalhoFacil(headers,'situação'),
+        etapa:idxEtapaHeader>=0 ? idxEtapaHeader : 2,
         codigo:idxCodigo,
         nomeProduto:idxCabecalhoFacil(headers,'nome',idxCodigo+1),
         quantidade:idxCabecalhoFacil(headers,'quantidade',idxCodigo+1),
       };
-      if(Object.values(idx).some(v=>v<0)){
-        notify('Não encontrei todos os cabeçalhos necessários: venda, situação, código, nome e quantidade.','error');
+      if([idx.venda, idx.etapa, idx.codigo, idx.nomeProduto, idx.quantidade].some(v=>v<0)){
+        notify('Não encontrei todos os cabeçalhos necessários: venda, etapa, código, nome e quantidade.','error');
         return;
       }
-      const preview=rows.slice(1).map(r=>pedidoPreviewDeProduto(r,idx))
-        .filter(p=>normalizarTextoBusca(p.situacao)==='pendente' && p.codigo && p.nome && p.quantidade>0);
+      const todos=rows.slice(1).map(r=>pedidoPreviewDeProduto(r,idx)).filter(p=>p.codigo && p.nome && p.quantidade>0);
+      const preview=todos.filter(p=>deveImportarPedidoPorEtapa(p.etapa));
+      const ignoradosEtapa=todos.length-preview.length;
       pedidosCsvDados=preview;
       renderPreviewPedidos(preview);
-      notify(`CSV lido: ${preview.length} item(ns) pendente(s).`);
+      notify(`CSV lido: ${preview.length} item(ns) válido(s) pela etapa. ${ignoradosEtapa} ignorado(s).`);
     }catch(err){notify('Erro ao ler CSV: '+err.message,'error');}
   };
   reader.readAsArrayBuffer(file);
@@ -4147,10 +4165,10 @@ function renderPreviewPedidos(preview){
   document.getElementById('card-preview-pedidos').style.display='block';
   const mapeados=preview.filter(p=>p.produtoId).length;
   const totalKg=preview.reduce((a,p)=>a+safeNum(p.volumeKg),0);
-  document.getElementById('preview-pedidos-info').textContent=`${preview.length} itens pendentes lidos. ${mapeados} vinculados ao PMS. ${preview.length-mapeados} sem vínculo. Volume estimado: ${fmtQtdFicha(totalKg)} kg.`;
+  document.getElementById('preview-pedidos-info').textContent=`${preview.length} itens válidos pela etapa. ${mapeados} vinculados ao PMS. ${preview.length-mapeados} sem vínculo. Volume estimado: ${fmtQtdFicha(totalKg)} kg.`;
   document.getElementById('tbody-preview-pedidos').innerHTML=preview.map(p=>`<tr>
     <td><span class="badge b-lote">${h(p.venda||'—')}</span></td>
-    <td>${h(p.situacao)}</td>
+    <td>${h(p.etapa||p.situacao||'—')}</td>
     <td>${h(p.codigo)}</td>
     <td style="font-weight:600">${h(p.nome)}</td>
     <td>${p.produtoId?`<span class="badge b-ok">${h(p.produtoNome)}</span>`:'<span class="badge b-warn">Sem vínculo</span>'}</td>
@@ -5783,7 +5801,7 @@ async function salvarRelatorioCustosFichas(){
     if(!r || !r.ok){
       let erro = (r && r.error) || 'Falha ao salvar relatorio de custos.';
       if(erroAcaoDesconhecida(r, 'salvarFechamentoCustosFichas') || erroAcaoDesconhecida(r, 'pmsRelCustosSalvarV425')){
-        erro = 'A URL publicada ainda nao reconhece o fechamento de custos. O backend que respondeu nao e o PMS Script.txt Rev 4.25.';
+        erro = 'A URL publicada ainda nao reconhece o fechamento de custos. O backend que respondeu nao e o PMS Script.txt Rev 4.27.';
       }
       renderRelatorioCustosFichasResultado(preview, {
         titulo: 'Pre-visualizacao mantida',
@@ -5861,7 +5879,7 @@ async function salvarRelatorioCustosViaSaveCadastro(preview){
   if(porModo && porModo.ok) return porModo;
   const erroModo = String((porModo && porModo.error) || '');
   if(/tipo inv/i.test(erroModo) || erroAcaoDesconhecida(porModo, 'saveCadastro')){
-    return {ok:false, error:'O saveCadastro publicado ainda e antigo e nao reconhece fechamento de custos. Ele precisa responder a Rev 4.25 para criar/gravar as abas custos_fichas_sintetico e custos_fichas_analitico.'};
+    return {ok:false, error:'O saveCadastro publicado ainda e antigo e nao reconhece fechamento de custos. Ele precisa responder a Rev 4.27 para criar/gravar as abas custos_fichas_sintetico e custos_fichas_analitico.'};
   }
 
   const rel = prepararRelatorioCustosParaSalvar(preview);
@@ -5874,7 +5892,7 @@ async function salvarRelatorioCustosViaSaveCadastro(preview){
     if(gravadas === 1 || gravadas % 25 === 0) mostrarLoading(true, `Salvando fechamento no Sheets... ${gravadas}/${total}`);
     const r = await gsCallSemOverlay({action:'saveCadastro', data:{tipo:'custosFichaSintetico', item:row}});
     if(!r || !r.ok){
-      return {ok:false, error:`Fallback saveCadastro falhou no sintetico: ${(r && r.error) || 'sem resposta'}. A URL publicada ainda nao tem suporte as abas de custo da Rev 4.25.`};
+      return {ok:false, error:`Fallback saveCadastro falhou no sintetico: ${(r && r.error) || 'sem resposta'}. A URL publicada ainda nao tem suporte as abas de custo da Rev 4.27.`};
     }
   }
   for(const row of rel.analiticoRows){
@@ -5882,7 +5900,7 @@ async function salvarRelatorioCustosViaSaveCadastro(preview){
     if(gravadas % 25 === 0) mostrarLoading(true, `Salvando fechamento no Sheets... ${gravadas}/${total}`);
     const r = await gsCallSemOverlay({action:'saveCadastro', data:{tipo:'custosFichaAnalitico', item:row}});
     if(!r || !r.ok){
-      return {ok:false, error:`Fallback saveCadastro falhou no analitico: ${(r && r.error) || 'sem resposta'}. A URL publicada ainda nao tem suporte as abas de custo da Rev 4.25.`};
+      return {ok:false, error:`Fallback saveCadastro falhou no analitico: ${(r && r.error) || 'sem resposta'}. A URL publicada ainda nao tem suporte as abas de custo da Rev 4.27.`};
     }
   }
   return {
