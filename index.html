@@ -939,6 +939,15 @@ tr.div-neg td{background:#fdf0ee !important}
       <button class="btn btn-primary" onclick="salvarRelatorioCustosFichas()" id="btn-salvar-rel-custos-ft">Salvar relatorio do periodo atual (hoje)</button>
     </div>
     <div class="form-grid" style="margin-top:12px">
+      <div class="form-group" style="grid-column:span 3">
+        <label>Rever relatorio salvo</label>
+        <select id="ft-rel-rever"><option value="">Nenhum fechamento salvo</option></select>
+      </div>
+      <div class="form-group" style="align-self:end">
+        <button class="btn btn-primary" onclick="verRelatorioCustosSalvo()" style="width:100%">Ver relatorio salvo</button>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:12px">
       <div class="form-group" style="grid-column:span 2">
         <label>Relatorio base</label>
         <select id="ft-rel-base" onchange="relCustosComparacaoAtual=null"><option value="">Nenhum fechamento salvo</option></select>
@@ -1253,10 +1262,11 @@ tr.div-neg td{background:#fdf0ee !important}
   <div class="card">
     <div class="card-title">📦 Abrir Nova Caixa de Amostra</div>
     <div class="form-grid">
-      <div class="form-group"><label>Nome/Identificação da Caixa *</label><input type="text" id="caixa-nome" placeholder="Ex: CAIXA-001"></div>
+      <div class="form-group"><label>Nome/Identificação da Caixa *</label><input type="text" id="caixa-nome" placeholder="Ex: CAIXA-001"><div id="caixa-proxima-info" class="form-note" style="margin-top:6px">Proxima numeracao sugerida: CAIXA-001</div></div>
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="abrirCaixa()" id="btn-abrir-caixa">Abrir Caixa</button>
+      <button class="btn" onclick="preencherProximaCaixaAmostra(true)">Usar proxima</button>
       <button class="btn" onclick="document.getElementById('caixa-nome').value=''">Limpar</button>
     </div>
   </div>
@@ -1290,7 +1300,7 @@ tr.div-neg td{background:#fdf0ee !important}
 </div><!-- /main -->
 
 <div class="toast" id="toast"></div>
-<div id="app-version">Rev 4.27</div>
+<div id="app-version">Rev 4.27.1</div>
 
 <script>
 // ═══ CONFIG ═══════════════════════════════════════════════════════
@@ -5285,15 +5295,75 @@ function listarFechamentosCustosFichas(){
 function preencherSelectsRelatoriosCustos(rels){
   const base = document.getElementById('ft-rel-base');
   const atual = document.getElementById('ft-rel-comparar');
+  const rever = document.getElementById('ft-rel-rever');
   if(!base || !atual) return;
   const oldBase = base.value;
   const oldAtual = atual.value;
+  const oldRever = rever ? rever.value : '';
   const opts = rels.map(r => `<option value="${h(r.id)}">${h(fmtBR(r.data))} | ${h(r.id)} | ${r.itens} produtos</option>`).join('');
   base.innerHTML = opts || '<option value="">Nenhum fechamento salvo</option>';
   atual.innerHTML = opts || '<option value="">Nenhum fechamento salvo</option>';
+  if(rever) rever.innerHTML = opts || '<option value="">Nenhum fechamento salvo</option>';
   const ids = new Set(rels.map(r => r.id));
   base.value = ids.has(oldBase) ? oldBase : (rels[1] && rels[1].id) || (rels[0] && rels[0].id) || '';
   atual.value = ids.has(oldAtual) ? oldAtual : (rels[0] && rels[0].id) || '';
+  if(rever) rever.value = ids.has(oldRever) ? oldRever : (rels[0] && rels[0].id) || '';
+}
+
+function montarRelatorioCustosSalvo(relId){
+  const sinteticoRows = linhasSinteticoRelatorio(relId).map(r => ({
+    ...r,
+    valorUnitario: parseNumeroBR(r.valorUnitario),
+    valorAnterior: parseNumeroBR(r.valorAnterior),
+    variacaoValor: parseNumeroBR(r.variacaoValor),
+    variacaoPct: parseNumeroBR(r.variacaoPct),
+    qtdInsumos: parseNumeroBR(r.qtdInsumos)
+  }));
+  const analiticoRows = linhasAnaliticoRelatorio(relId).map(r => ({
+    ...r,
+    qtdUnidade: parseNumeroBR(r.qtdUnidade),
+    valorUnitInsumo: parseNumeroBR(r.valorUnitInsumo),
+    custoUnitario: parseNumeroBR(r.custoUnitario),
+    pctCusto: parseNumeroBR(r.pctCusto),
+    custoAnterior: parseNumeroBR(r.custoAnterior),
+    variacaoValor: parseNumeroBR(r.variacaoValor),
+    variacaoPct: parseNumeroBR(r.variacaoPct)
+  }));
+  if(!sinteticoRows.length && !analiticoRows.length) throw new Error('Relatorio salvo nao encontrado.');
+  const meta = listarFechamentosCustosFichas().find(r => String(r.id) === String(relId)) || {};
+  const dataRelatorio = meta.data || (sinteticoRows[0] && sinteticoRows[0].dataRelatorio) || (analiticoRows[0] && analiticoRows[0].dataRelatorio) || '';
+  return {
+    ok:true,
+    preview:false,
+    salvo:true,
+    relatorioId:relId,
+    dataRelatorio,
+    sinteticos:sinteticoRows.length,
+    analiticos:analiticoRows.length,
+    ignorados:0,
+    comparacoes:[],
+    sinteticoRows,
+    analiticoRows,
+    fontePrecos:'Fechamento salvo no Sheets',
+    wmsChavesPreco:0,
+    insumosSemPrecoWms:analiticoRows.filter(i => !(parseNumeroBR(i.valorUnitInsumo) > 0)).length
+  };
+}
+
+function verRelatorioCustosSalvo(){
+  try{
+    const relId = document.getElementById('ft-rel-rever')?.value || '';
+    if(!relId) throw new Error('Selecione um relatorio salvo para rever.');
+    const rel = montarRelatorioCustosSalvo(relId);
+    relCustosPreviewAtual = rel;
+    abrirPopupPreviewRelatorioCustosFichas(rel);
+    renderRelatorioCustosFichasResultado(rel, {
+      titulo: 'Relatorio salvo aberto',
+      aviso: 'Fechamento historico carregado do Sheets em modo consulta.'
+    });
+  }catch(e){
+    notify((e && e.message) || String(e), 'error');
+  }
 }
 
 async function previsualizarRelatorioCustosFichas(){
@@ -5335,6 +5405,7 @@ function abrirPopupPreviewRelatorioCustosFichas(rel){
 }
 
 function montarHtmlPreviewRelatorioCustos(rel){
+  const tituloRelatorio = rel && rel.salvo ? 'Relatorio Salvo de Custos das Fichas' : 'Previa - Relatorio de Custos das Fichas';
   const sinteticos = (rel.sinteticoRows || []).slice().sort((a,b) =>
     String(a.produtoCod || '').localeCompare(String(b.produtoCod || ''), 'pt-BR', {numeric:true})
     || String(a.produtoNome || '').localeCompare(String(b.produtoNome || ''), 'pt-BR')
@@ -5372,7 +5443,7 @@ function montarHtmlPreviewRelatorioCustos(rel){
     </section>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8">
-    <title>Previa - Relatorio de Custos das Fichas</title>
+    <title>${h(tituloRelatorio)}</title>
     <link rel="icon" type="image/png" href="${LOGO_URL}">
     <style>
       @page{size:A4;margin:10mm}
@@ -5410,7 +5481,7 @@ function montarHtmlPreviewRelatorioCustos(rel){
     <div class="actions"><button onclick="window.print()">Imprimir esta previa</button></div>
     <div class="print-header">
       <img class="print-logo" src="${LOGO_URL}" alt="Explosao Alimentos">
-      <div><h1>Previa - Relatorio de Custos das Fichas</h1><div class="meta">Data: ${fmtBR(rel.dataRelatorio || hoje())} | Gerado em ${new Date().toLocaleString('pt-BR')}<br>Fonte: ${h(rel.fontePrecos || 'WMS')}</div></div>
+      <div><h1>${h(tituloRelatorio)}</h1><div class="meta">Data: ${fmtBR(rel.dataRelatorio || hoje())} | Gerado em ${new Date().toLocaleString('pt-BR')}<br>Fonte: ${h(rel.fontePrecos || 'WMS')}</div></div>
     </div>
     <div class="summary">
       <span>Total de produtos: <strong>${safeNum(rel.sinteticos)}</strong></span>
@@ -6513,7 +6584,35 @@ function limparUsr(){
 // CAIXAS DE AMOSTRA
 // ═══════════════════════════════════════════════════════════════════
 
+function sugerirProximoNomeCaixaAmostra(){
+  let melhorNumero = 0;
+  let melhorPrefixo = 'CAIXA-';
+  let melhorDigitos = 3;
+  (S.caixasAmostra || []).forEach(c => {
+    const nome = String(c && c.nome || '').trim();
+    const m = nome.match(/^(.*?)(\d+)\s*$/);
+    if(!m) return;
+    const numero = parseInt(m[2], 10);
+    if(!Number.isFinite(numero)) return;
+    if(numero > melhorNumero){
+      melhorNumero = numero;
+      melhorPrefixo = m[1] || 'CAIXA-';
+      melhorDigitos = Math.max(3, m[2].length);
+    }
+  });
+  return melhorPrefixo + String(melhorNumero + 1).padStart(melhorDigitos, '0');
+}
+
+function preencherProximaCaixaAmostra(forcar){
+  const prox = sugerirProximoNomeCaixaAmostra();
+  const input = document.getElementById('caixa-nome');
+  const info = document.getElementById('caixa-proxima-info');
+  if(info) info.textContent = `Proxima numeracao sugerida: ${prox}`;
+  if(input && (forcar || !String(input.value || '').trim())) input.value = prox;
+}
+
 function renderCaixas(){
+  preencherProximaCaixaAmostra(false);
   if(!S.caixasAmostra || S.caixasAmostra.length === 0){
     document.getElementById('tbody-caixas-abertas').innerHTML='<tr><td colspan="6" class="empty">Nenhuma caixa aberta.</td></tr>';
     document.getElementById('tbody-caixas-fechadas').innerHTML='<tr><td colspan="7" class="empty">Nenhuma caixa fechada.</td></tr>';
@@ -6561,8 +6660,8 @@ async function abrirCaixa(){
   if(r && r.ok) {
     await sincronizar(true);
     notify('Caixa aberta!');
-    document.getElementById('caixa-nome').value = '';
     renderCaixas();
+    preencherProximaCaixaAmostra(true);
   } else if(r) notify(r.error||'Erro.','error');
 }
 
